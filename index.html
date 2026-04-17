@@ -2,7 +2,11 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Academia Leading Up">
+<meta name="theme-color" content="#0066CC">
 <title>NTT Data · Simulador de Liderazgo</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -440,6 +444,17 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4fb;color:var(--black);min-
 
 @media(max-width:1100px){.game-body{grid-template-columns:250px 1fr;}.sidebar-right{display:none;}.adm-body{grid-template-columns:1fr;}.adm-sidebar{display:none;}}
 @media(max-width:768px){.game-body{grid-template-columns:1fr;}.sidebar-left{display:none;}.final-scores{grid-template-columns:1fr;}.welcome-title{font-size:38px;}.teams-grid{grid-template-columns:1fr 1fr;}.triv-opts{grid-template-columns:1fr;}.teams-status{grid-template-columns:1fr;}.global-actions{grid-template-columns:1fr;}}
+/* iOS keyboard fixes */
+@media(max-height:600px){.crisis-overlay,.freeze-overlay,.call-incoming-overlay{padding:20px;max-height:90vh;overflow-y:auto;}.crisis-chat-overlay{height:100vh;}.crisis-chat-msgs{max-height:50vh;}.btn{padding:10px 16px;font-size:14px;}}
+@supports(padding:max(0px)){body{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));padding-bottom:max(12px,env(safe-area-inset-bottom));}}
+input,textarea{font-size:16px !important;border-radius:8px;-webkit-appearance:none;-webkit-user-select:text;user-select:text;position:relative;z-index:10;}
+input:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,102,204,.1);}
+/* Safari iOS fixes */
+button{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;}
+html,body{-webkit-user-select:none;-webkit-touch-callout:none;}
+.screen{position:fixed;inset:0;width:100%;height:100vh;-webkit-user-select:none;}
+.screen.active{position:fixed;display:flex;}
+input,textarea{-webkit-user-select:text;}
 
 /* ═══════════════════════════════════════
    CASO EJECUTIVO — EMPODERAR BAJO PRESIÓN
@@ -755,6 +770,40 @@ body{font-family:'DM Sans',sans-serif;background:#f0f4fb;color:var(--black);min-
 </style>
 </head>
 <body>
+
+<script>
+// Inicialización inmediata para Safari iOS
+(function() {
+  // Prevenir zoom accidental
+  document.addEventListener('touchmove', function(e) {
+    if(e.touches.length > 1) e.preventDefault();
+  }, false);
+  
+  // Prevenir bounce scroll en iOS
+  document.body.addEventListener('touchmove', function(e) {
+    if(e.target.closest('.scrollable')) return;
+    e.preventDefault();
+  }, { passive: false });
+  
+  // Fix para viewport en iOS
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if(viewport && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    // Safari iOS necesita reflow forzado
+    setTimeout(() => {
+      document.documentElement.style.height = window.innerHeight + 'px';
+    }, 100);
+  }
+  
+  // Catch global errors temprano
+  window.addEventListener('error', (e) => {
+    console.error('❌ Error:', e.message, e.filename, e.lineno);
+  });
+  
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('❌ Promise rejection:', e.reason);
+  });
+})();
+</script>
 
 <!-- WELCOME -->
 <div id="screen-welcome" class="screen active">
@@ -1394,14 +1443,96 @@ Ejemplos de tono:
 
 
 // ═══════════════════════════════════════════════════════════════
-// BROADCAST CHANNEL — real-time sync between tabs
+// BROADCAST CHANNEL — real-time sync between tabs (con fallback iOS)
 // ═══════════════════════════════════════════════════════════════
 window.ANTHROPIC_API_KEY = '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';
-const BC = new BroadcastChannel('nttdata_sim_2025');
-BC.onmessage = (e) => handleBCMessage(e.data);
+
+// Diagnostic info for iOS
+console.log('🍎 iOS Simulator Status:', {
+  isIOS: isSafariIOS,
+  hasBroadcastChannel: typeof BroadcastChannel !== 'undefined',
+  hasLocalStorage: typeof localStorage !== 'undefined',
+  userAgent: navigator.userAgent.substring(0, 50)
+});
+
+// Fallback para iOS Safari que no soporta BroadcastChannel
+let BC = null;
+const isSafariIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+try {
+  if(typeof BroadcastChannel !== 'undefined') {
+    BC = new BroadcastChannel('nttdata_sim_2025');
+    BC.onmessage = (e) => handleBCMessage(e.data);
+  }
+} catch(e) {
+  console.warn('BroadcastChannel no soportado, usando fallback localStorage');
+  BC = null;
+}
+
+// Fallback: polling de localStorage para iOS
+if(!BC && isSafariIOS) {
+  setInterval(() => {
+    const msg = localStorage.getItem('nttdata_bc_msg');
+    if(msg && msg !== window.lastBCMsg) {
+      window.lastBCMsg = msg;
+      try {
+        const data = JSON.parse(msg);
+        handleBCMessage(data);
+      } catch(e) {}
+    }
+  }, 500);
+}
 
 function bcSend(type, payload={}) {
-  BC.postMessage({ type, payload, ts: Date.now() });
+  const msg = { type, payload, ts: Date.now() };
+  if(BC) {
+    BC.postMessage(msg);
+  }
+  // También guardar en localStorage como fallback
+  try {
+    localStorage.setItem('nttdata_bc_msg', JSON.stringify(msg));
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SAFE DOM HELPERS - iOS compatibility
+// ═══════════════════════════════════════════════════════════════
+function $(id) {
+  const el = document.getElementById(id);
+  if(!el && !id.includes('optional')) {
+    console.warn('⚠️ Elemento no encontrado:', id);
+  }
+  return el;
+}
+
+function setText(id, value) {
+  const el = $(id);
+  if(el) el.textContent = value;
+}
+
+function setHTML(id, value) {
+  const el = $(id);
+  if(el) el.innerHTML = value;
+}
+
+function getValue(id) {
+  const el = $(id);
+  return el ? el.value : '';
+}
+
+function setValue(id, value) {
+  const el = $(id);
+  if(el) el.value = value;
+}
+
+function setDisabled(id, disabled) {
+  const el = $(id);
+  if(el) el.disabled = disabled;
+}
+
+function setDisplay(id, display) {
+  const el = $(id);
+  if(el) el.style.display = display;
 }
 
 function handleAdminMessages(msg) {
@@ -1739,11 +1870,25 @@ let adminTeamData={
 // SCREEN NAV
 // ═══════════════════════════════════════════════════════════════
 function showScreen(n){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  const el=document.getElementById('screen-'+n);
-  if(el)el.classList.add('active');
+  try {
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    const el=document.getElementById('screen-'+n);
+    if(el) {
+      el.classList.add('active');
+      // Force repaint in Safari iOS
+      el.offsetHeight;
+    }
+  } catch(e) {
+    console.error('Error en showScreen:', e);
+  }
 }
-function showAdminLogin(){showScreen('admin-login');document.getElementById('adm-pw').focus();}
+function showAdminLogin(){
+  showScreen('admin-login');
+  setTimeout(() => {
+    const el = document.getElementById('adm-pw');
+    if(el) el.focus();
+  }, 100);
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ADMIN AUTH
@@ -4063,7 +4208,8 @@ ${beh?.name||''}: "${beh?.def||''}"
 Guíales con preguntas que activen el pensamiento crítico sobre ${beh?.name||'el liderazgo'}. Corto, directo, con tensión. En español.`;
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{
+      method:'POST', 
+      headers:{
         'Content-Type':'application/json',
         'x-api-key':(window.ANTHROPIC_API_KEY||''),
         'anthropic-version':'2023-06-01',
@@ -4071,15 +4217,32 @@ Guíales con preguntas que activen el pensamiento crítico sobre ${beh?.name||'e
       },
       body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:800, system:sys, messages: crisisChatMessages })
     });
+    
+    if(!res.ok) {
+      throw new Error(`API responded with ${res.status}: ${res.statusText}`);
+    }
+    
     hideCrisisTyping();
     const data = await res.json();
-    const reply = data.content?.[0]?.text || '¿Y qué haríais diferente si el tiempo se acaba?';
+    if(!data.content || data.content.length === 0) {
+      throw new Error('Empty response from API');
+    }
+    const reply = data.content[0]?.text || '¿Y qué haríais diferente si el tiempo se acaba?';
     appendCrisisMsg('ai','Asesor IA', reply);
     crisisChatMessages.push({role:'assistant', content:reply});
   } catch(e) {
     hideCrisisTyping();
-    console.error('Error en API:', e);
-    appendCrisisMsg('ai','Asesor IA', !window.ANTHROPIC_API_KEY ? '⚠️ API key no configurada. El facilitador debe introducirla en el panel admin.' : '⚠️ Error conectando con asesor IA. Intenta de nuevo en unos segundos.');
+    console.error('❌ Error en API:', {
+      message: e.message,
+      stack: e.stack,
+      apiKey: window.ANTHROPIC_API_KEY ? 'Configurada' : 'NO CONFIGURADA'
+    });
+    const errorMsg = !window.ANTHROPIC_API_KEY 
+      ? '⚠️ API key no configurada. El facilitador debe introducirla en el panel admin.' 
+      : e.message.includes('API responded with 401')
+      ? '⚠️ API key inválida. Verifica en panel admin.'
+      : '⚠️ Error conectando. Revisa conexión a internet e intenta de nuevo.';
+    appendCrisisMsg('ai','Asesor IA', errorMsg);
   }
 }
 
